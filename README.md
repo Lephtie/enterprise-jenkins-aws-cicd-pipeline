@@ -1,4 +1,4 @@
-# enterprise-jenkins-aws-cicd-pipeline
+# ENTERPRISE-JENKINS-AWS-CICD-PIPELINE
 Developer → GitHub → CI Pipeline → Container Registry → Deployment
 
 # Overview
