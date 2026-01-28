@@ -1,116 +1,135 @@
-//This pipeline fetches code from GitHub, builds a Maven project, runs tests and code analysis, builds a Docker image, and pushes it to AWS ECR.
-//Dependency: CloudBees Docker Build and Publish must be installed in Jenkins
-//Dependency: SonarQube plugin must be installed in Jenkins
-//Dependency: AWS CLI must be configured in Jenkins server for ECR access
-//Dependency: Maven and JDK must be configured in Jenkins global tool configuration
-//Dependency: SonarQube server must be configured in Jenkins global configuration
-//Dependency: Jenkins user must have permission to push images to the specified ECR repository
-//Dependency: Docker pipline plugin must be installed in Jenkins
-//Dependency: ECR plugin must be installed in Jenkins
-//Dependency: AWS SDK must be installed in Jenkins server
-//Dependency: Install Docker engine on Jenkins server
-//Dependency: Store aws access key and secret key in Jenkins credentials with ID
-//Dependency: ECS plugin must be installed in Jenkins
-//Dependency: ECS cluster and service must be created in AWS
-//Dependency: Jenkins user must have permission to update ECS service
+/*
+ Jenkins Declarative Pipeline
+ ----------------------------
+ Purpose:
+ - Fetch source code from GitHub
+ - Build and package a Maven application
+ - Run static code analysis (Checkstyle & SonarQube)
+ - Build and push Docker image to AWS ECR
+ - Deploy updated image to AWS ECS
+
+ Prerequisites:
+ - Jenkins with Maven, JDK, Docker, AWS CLI configured
+ - SonarQube server integrated with Jenkins
+ - AWS credentials stored securely in Jenkins
+ - ECR repository and ECS cluster/service pre-created
+*/
 
 pipeline {
+
+    /* Run pipeline on any available Jenkins agent */
     agent any
+
+    /* Define build tools configured in Jenkins global tools */
     tools {
         maven "MAVEN3.9"
         jdk "JDK17"
     }
 
-
+    /* Global environment variables */
     environment {
         registryCredential = 'ecr:us-east-1:awscreds'
-        appRegistry = "061039793545.dkr.ecr.us-east-1.amazonaws.com/vprofile-app-img"
-        vprofileRegistry = "https://061039793545.dkr.ecr.us-east-1.amazonaws.com/"
-        cluster = "vprofile"
-        service = "vprofileapp-svc"
+        appRegistry        = "061039793545.dkr.ecr.us-east-1.amazonaws.com/vprofile-app-img"
+        vprofileRegistry   = "https://061039793545.dkr.ecr.us-east-1.amazonaws.com/"
+        cluster            = "vprofile"
+        service            = "vprofileapp-svc"
     }
-  stages {
-   
-        stage('Fetch code') {
+
+    stages {
+
+        /* Clone application source code from GitHub */
+        stage('Fetch Code') {
             steps {
-               git branch: 'docker', url: 'https://github.com/hkhcoder/vprofile-project.git'
+                git branch: 'docker',
+                    url: 'https://github.com/hkhcoder/vprofile-project.git'
             }
-
         }
 
-
-        stage('Build'){
-            steps{
-               sh 'mvn install -DskipTests'
+        /* Build and package the application using Maven */
+        stage('Build Application') {
+            steps {
+                sh 'mvn install -DskipTests'
             }
-
             post {
-               success {
-                  echo 'Now Archiving it...'
-                  archiveArtifacts artifacts: '**/target/*.war'
-               }
+                success {
+                    echo 'Archiving generated WAR file'
+                    archiveArtifacts artifacts: '**/target/*.war'
+                }
             }
         }
 
+        /* Perform static code analysis using Checkstyle */
         stage('Checkstyle Analysis') {
-            steps{
+            steps {
                 sh 'mvn checkstyle:checkstyle'
             }
         }
 
-        stage("Sonar Code Analysis") {
+        /* Perform code quality analysis using SonarQube */
+        stage('SonarQube Analysis') {
             environment {
                 scannerHome = tool 'SONAR7.3'
             }
             steps {
-              withSonarQubeEnv('SonarQube-Server') {
-                sh '''${scannerHome}/bin/sonar-scanner -Dsonar.projectKey=vprofile \
-                   -Dsonar.projectName=vprofile \
-                   -Dsonar.projectVersion=1.0 \
-                   -Dsonar.sources=src/ \
-                   -Dsonar.java.binaries=target/test-classes/com/visualpathit/account/controllerTest/ \
-                   -Dsonar.junit.reportsPath=target/surefire-reports/ \
-                   -Dsonar.jacoco.reportsPath=target/jacoco.exec \
-                   -Dsonar.java.checkstyle.reportPaths=target/checkstyle-result.xml'''
-              }
-            }
-        }
-
-        stage('Build App Image') {
-          steps {
-       
-            script {
-                dockerImage = docker.build( appRegistry + ":$BUILD_NUMBER", "./Docker-files/app/multistage/")
+                withSonarQubeEnv('SonarQube-Server') {
+                    sh """
+                    ${scannerHome}/bin/sonar-scanner \
+                    -Dsonar.projectKey=vprofile \
+                    -Dsonar.projectName=vprofile \
+                    -Dsonar.projectVersion=1.0 \
+                    -Dsonar.sources=src/ \
+                    -Dsonar.java.binaries=target/test-classes/ \
+                    -Dsonar.junit.reportsPath=target/surefire-reports/ \
+                    -Dsonar.jacoco.reportsPath=target/jacoco.exec \
+                    -Dsonar.java.checkstyle.reportPaths=target/checkstyle-result.xml
+                    """
                 }
-          }
-    
-        }
-
-        stage('Upload App Image') {
-          steps{
-            script {
-              docker.withRegistry( vprofileRegistry, registryCredential ) {
-                dockerImage.push("$BUILD_NUMBER")
-                dockerImage.push('latest')
-              }
             }
-          }
         }
 
-        stage('Remove Container Images'){
-            steps{
+        /* Build Docker image using a multi-stage Dockerfile */
+        stage('Build Docker Image') {
+            steps {
+                script {
+                    dockerImage = docker.build(
+                        "${appRegistry}:${BUILD_NUMBER}",
+                        "./Docker-files/app/multistage/"
+                    )
+                }
+            }
+        }
+
+        /* Push Docker image to AWS ECR */
+        stage('Push Image to ECR') {
+            steps {
+                script {
+                    docker.withRegistry(vprofileRegistry, registryCredential) {
+                        dockerImage.push("${BUILD_NUMBER}")
+                        dockerImage.push("latest")
+                    }
+                }
+            }
+        }
+
+        /* Cleanup unused Docker images to save disk space */
+        stage('Cleanup Docker Images') {
+            steps {
                 sh 'docker rmi -f $(docker images -a -q)'
             }
         }
 
-
-        stage('Deploy to ecs') {
-          steps {
-            withAWS(credentials: 'awscreds', region: 'us-east-1') {
-            sh 'aws ecs update-service --cluster ${cluster} --service ${service} --force-new-deployment'
-               }
-          }
+        /* Deploy latest image to AWS ECS service */
+        stage('Deploy to ECS') {
+            steps {
+                withAWS(credentials: 'awscreds', region: 'us-east-1') {
+                    sh '''
+                    aws ecs update-service \
+                      --cluster ${cluster} \
+                      --service ${service} \
+                      --force-new-deployment
+                    '''
+                }
+            }
         }
-
-  }
+    }
 }
