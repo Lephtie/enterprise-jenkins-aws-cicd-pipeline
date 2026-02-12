@@ -140,6 +140,8 @@ pipeline {
             }
         }
     }
+
+    /* Post-build actions for Slack notifications */
     post {
         always {
             echo 'Slack Notifications.'
