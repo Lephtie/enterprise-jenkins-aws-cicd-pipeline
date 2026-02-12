@@ -15,13 +15,6 @@
  - ECR repository and ECS cluster/service pre-created
 */
 
-/* Define a color map for Slack notifications */
-def COLOR_MAP = [
-    'SUCCESS': 'good', 
-    'FAILURE': 'danger',
-    'UNSTABLE': 'warning',
-    'ABORTED': 'danger'
-]
 
 pipeline {
 
@@ -140,17 +133,4 @@ pipeline {
             }
         }
     }
-<<<<<<< HEAD
-=======
-
-    /* Send Slack notifications of build results */
-    post {
-        always {
-            echo 'Slack Notifications.'
-            slackSend   channel: '#jenkins-cicd',
-                        color: COLOR_MAP[currentBuild.currentResult],
-                        message: "*${currentBuild.currentResult}:* Job ${env.JOB_NAME} build ${env.BUILD_NUMBER} \n More info at: ${env.BUILD_URL}"
-        }
-    }
->>>>>>> slack
 }
