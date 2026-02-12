@@ -38,7 +38,7 @@ pipeline {
 
     stages {
 
-        /* Clone application source code from GitHub */
+        /* Clone Java application source code from GitHub */
         stage('Fetch Code') {
             steps {
                 git branch: 'docker',
@@ -112,7 +112,7 @@ pipeline {
             }
         }
 
-        /* Cleanup unused Docker images to save disk space */
+        /* Cleanup unused Docker images to save up on disk space */
         stage('Cleanup Docker Images') {
             steps {
                 sh 'docker rmi -f $(docker images -a -q)'
